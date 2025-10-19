@@ -1,0 +1,152 @@
+<?php
+/**
+ * Script de instalación simplificado para CCI Surveys
+ * Este script crea la base de datos y las tablas necesarias sin transacciones complejas
+ */
+
+// Configuración de la base de datos para XAMPP
+$db_config = [
+    'host' => 'localhost',
+    'port' => '3306',
+    'username' => 'root',      // Usuario por defecto de XAMPP
+    'password' => '',          // Contraseña vacía por defecto en XAMPP
+    'database' => 'surveys'
+];
+
+echo "<h1>Instalación Simplificada de CCI Surveys</h1>\n";
+echo "<p>Iniciando proceso de instalación...</p>\n";
+
+try {
+    // Conectar a MySQL sin especificar base de datos
+    $dsn = "mysql:host={$db_config['host']};port={$db_config['port']};charset=utf8mb4";
+    $pdo = new PDO($dsn, $db_config['username'], $db_config['password'], [
+        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC
+    ]);
+    
+    echo "<p>✓ Conexión a MySQL establecida</p>\n";
+    
+    // Crear base de datos si no existe
+    $pdo->exec("CREATE DATABASE IF NOT EXISTS `{$db_config['database']}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
+    echo "<p>✓ Base de datos '{$db_config['database']}' creada o verificada</p>\n";
+    
+    // Conectar a la base de datos específica
+    $dsn = "mysql:host={$db_config['host']};port={$db_config['port']};dbname={$db_config['database']};charset=utf8mb4";
+    $pdo = new PDO($dsn, $db_config['username'], $db_config['password'], [
+        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC
+    ]);
+    
+    // Leer y ejecutar el schema SQL
+    $schema_sql = file_get_contents(__DIR__ . '/database/schema.sql');
+    
+    if ($schema_sql === false) {
+        throw new Exception("No se pudo leer el archivo schema.sql");
+    }
+    
+    // Dividir el SQL en statements individuales y ejecutar uno por uno
+    $statements = array_filter(
+        array_map('trim', explode(';', $schema_sql)),
+        function($stmt) {
+            return !empty($stmt) && !preg_match('/^--/', $stmt);
+        }
+    );
+    
+    $tablas_creadas = 0;
+    foreach ($statements as $statement) {
+        if (!empty(trim($statement))) {
+            try {
+                $pdo->exec($statement);
+                $tablas_creadas++;
+            } catch (Exception $e) {
+                echo "<p>⚠️ Advertencia al ejecutar statement: " . htmlspecialchars($e->getMessage()) . "</p>\n";
+            }
+        }
+    }
+    
+    echo "<p>✓ Tablas creadas exitosamente ($tablas_creadas statements ejecutados)</p>\n";
+    
+    // Crear usuario administrador por defecto
+    try {
+        $admin_password = password_hash('admin123', PASSWORD_ARGON2ID, [
+            'memory_cost' => 65536,
+            'time_cost' => 4,
+            'threads' => 3
+        ]);
+        
+        $stmt = $pdo->prepare("
+            INSERT INTO users (username, email, password_hash, first_name, last_name, role, is_active) 
+            VALUES ('admin', 'admin@cci-surveys.com', :password, 'Administrador', 'Sistema', 'admin', 1)
+            ON DUPLICATE KEY UPDATE 
+            password_hash = :password,
+            is_active = 1
+        ");
+        $stmt->bindParam(':password', $admin_password);
+        $stmt->execute();
+        
+        echo "<p>✓ Usuario administrador creado/actualizado</p>\n";
+    } catch (Exception $e) {
+        echo "<p>⚠️ Advertencia: No se pudo crear/actualizar el usuario administrador: " . htmlspecialchars($e->getMessage()) . "</p>\n";
+    }
+    
+    echo "<div style='background: #d4edda; border: 1px solid #c3e6cb; padding: 15px; margin: 20px 0; border-radius: 5px;'>";
+    echo "<h3 style='color: #155724; margin-top: 0;'>¡Instalación Completada!</h3>";
+    echo "<p style='color: #155724; margin-bottom: 0;'>El sistema CCI Surveys ha sido instalado exitosamente.</p>";
+    echo "</div>";
+    
+    echo "<h3>Credenciales por defecto:</h3>";
+    echo "<ul>";
+    echo "<li><strong>Usuario:</strong> admin</li>";
+    echo "<li><strong>Contraseña:</strong> admin123</li>";
+    echo "</ul>";
+    
+    echo "<h3>Próximos pasos:</h3>";
+    echo "<ol>";
+    echo "<li>Verificar la instalación en: <a href='verificar_instalacion.php'>verificar_instalacion.php</a></li>";
+    echo "<li>Acceder al sistema en: <a href='auth/login.php'>auth/login.php</a></li>";
+    echo "<li>Cambiar la contraseña del administrador</li>";
+    echo "<li>Configurar las poblaciones según sus necesidades</li>";
+    echo "<li>Crear usuarios encuestadores</li>";
+    echo "<li>Restaurar la seguridad ejecutando: <a href='restaurar_seguridad.php'>restaurar_seguridad.php</a></li>";
+    echo "</ol>";
+    
+    echo "<div style='background: #fff3cd; border: 1px solid #ffeaa7; padding: 15px; margin: 20px 0; border-radius: 5px;'>";
+    echo "<h4 style='color: #856404; margin-top: 0;'>⚠️ Importante - Seguridad</h4>";
+    echo "<p style='color: #856404; margin-bottom: 0;'>Después de verificar que todo funciona correctamente, ejecute <strong>restaurar_seguridad.php</strong> para eliminar los archivos de instalación y restaurar la configuración de seguridad.</p>";
+    echo "</div>";
+    
+} catch (Exception $e) {
+    echo "<div style='background: #f8d7da; border: 1px solid #f5c6cb; padding: 15px; margin: 20px 0; border-radius: 5px;'>";
+    echo "<h3 style='color: #721c24; margin-top: 0;'>Error en la Instalación</h3>";
+    echo "<p style='color: #721c24; margin-bottom: 0;'>Error: " . htmlspecialchars($e->getMessage()) . "</p>";
+    echo "</div>";
+    
+    echo "<h3>Posibles soluciones:</h3>";
+    echo "<ul>";
+    echo "<li>Verifique que MySQL esté ejecutándose</li>";
+    echo "<li>Confirme las credenciales de la base de datos</li>";
+    echo "<li>Asegúrese de que el usuario tenga permisos para crear bases de datos</li>";
+    echo "<li>Verifique que los archivos schema.sql y sample_data.sql existan</li>";
+    echo "<li>Intente con el instalador simplificado: <a href='install_simple.php'>install_simple.php</a></li>";
+    echo "</ul>";
+}
+?>
+
+<style>
+body {
+    font-family: Arial, sans-serif;
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 20px;
+    line-height: 1.6;
+}
+h1, h2, h3 {
+    color: #333;
+}
+code {
+    background: #f4f4f4;
+    padding: 2px 4px;
+    border-radius: 3px;
+}
+</style>
+
